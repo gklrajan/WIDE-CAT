@@ -1,0 +1,9 @@
+matfile_path='D:\Gokul\2024-Widefield\data\preprocessed\preprocessed_fish5_good-definiteLearner_\preprocessed_fish5_good-definiteLearner_.mat';
+psf_path='D:\Gokul\2024-Widefield\data\preprocessed\00_inverted_normalized_psf_16bit_binned2.tif';
+num_iterations=5;
+pad_size=150;
+slices_per_vol=40;
+
+%reduce_matfile(matfile_path, slices_per_vol); get a reduced stack for
+%tests
+apply_filters_and_deconvolve(matfile_path, psf_path, num_iterations, pad_size);
