@@ -1,0 +1,33 @@
+% Define raw stack
+rawStack = 'G:\GR\WF-data\test_deconv\original_withoutDeconv\1\reduce_preprocessed_fish5_good-definiteLearner_.mat';
+
+% Define different deconvolution methods
+deconvStacks = {
+    'G:\GR\WF-data\test_deconv\bandpass\1\reduce_preprocessed_fish5_good-definiteLearner__bandpass_deconv.mat';
+    'G:\GR\WF-data\test_deconv\bilateral\1\reduce_preprocessed_fish5_good-definiteLearner__bilateral_deconv.mat';
+    'G:\GR\WF-data\test_deconv\gaussian\1\reduce_preprocessed_fish5_good-definiteLearner__gaussian_deconv.mat';
+    'G:\GR\WF-data\test_deconv\median\1\reduce_preprocessed_fish5_good-definiteLearner__median_deconv.mat';
+    'G:\GR\WF-data\test_deconv\nofilt_deconv\1\reduce_preprocessed_fish5_good-definiteLearner__raw_deconv.mat'
+};
+
+% Analysis parameters
+volume_range = 1:25;
+slices_per_vol = 40;
+roi_masks = roi_masks; % Set this if you want consistent ROIs across all deconv methods
+
+% Loop through each deconvolution method
+for i = 1:length(deconvStacks)
+    deconvStack = deconvStacks{i};
+    
+    fprintf('Processing: %s\n', deconvStack);
+    
+    % Run quantitative analysis
+    analyze_deconvolution_dff(rawStack, deconvStack, volume_range, slices_per_vol, roi_masks);
+    
+    % Save example stacks
+    get_tiff_examples(rawStack, deconvStack, 20, slices_per_vol);
+    
+    fprintf('Finished processing: %s\n', deconvStack);
+end
+
+fprintf('All deconvolution methods processed.\n');

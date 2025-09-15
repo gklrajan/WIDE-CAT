@@ -1,0 +1,7 @@
+numpy
+scipy
+matplotlib
+skimage
+PyDAQmx
+nidaqmx
+pygame
