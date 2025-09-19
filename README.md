@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17162471.svg)](https://doi.org/10.5281/zenodo.17162471)
+
 # Widefield Calcium Analysis Toolbox (WIDE-CAT)
 
 <div align="center">
