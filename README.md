@@ -138,6 +138,13 @@ Developed by Gokul Rajan. Orger Lab, Champalimaud Foundation.
 
 ---
 
+## Citation
+
+Rajan, G. (2025). WIDE-CAT: Widefield Calcium Analysis Toolbox (v1.0.0). Zenodo. https://doi.org/10.5281/zenodo.17162471
+
+
+---
+
 ## Acknowledgement
 
 This was developed at the Champalimaud Foundation in the Vision to Action Laboratory of Michael B. Orger. Thanks to Adrien Jouary for useful discussions on the optical setup.
