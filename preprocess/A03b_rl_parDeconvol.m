@@ -8,7 +8,7 @@
 % This program is free software: you can redistribute it and/or modify
 % it under the terms of the GNU General Public License as published by
 % the Free Software Foundation, either version 3 of the License, or
-% (at your option) any later version.
+% any later version.
 %
 % This program is distributed in the hope that it will be useful,
 % but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -30,14 +30,15 @@ end
 
 %   CONFIGURABLE PARAMETERS  
 use_mat = true; % Set to `true` to use .mat files as input, `false` for .tif
-pad_size = 150; % Padding size in pixels (applies to all sides)
-num_iterations = 7; % RL iterations
+pad_size = 20; % Padding size in pixels (applies to all sides)
+num_iterations = 25; % RL iterations
 slices_per_vol = 40; % Fixed volume size
 
 %   Paths  
-inputRoot = 'D:/Gokul/2024-Widefield/data/motion_corrected_rigid/';
-outputRoot = 'D:/Gokul/2024-Widefield/data/rl_deconvolved/';
-psf_path = 'D:\Gokul\2024-Widefield\data\preprocessed\00_inverted_normalized_psf_16bit_binned2.tif';
+inputRoot = 'F:\processed data\maintenance\test';
+outputRoot = 'F:\processed data\maintenance\test\rl_deconvolved';
+
+psf_path = 'D:\Gokul\2024-Widefield\data\preprocessed\psf_prepared_for_RL.tif';
 
 %   Ensure output directory exists  
 if ~exist(outputRoot, 'dir')
@@ -47,8 +48,8 @@ end
 %   Load PSF  
 fprintf('Loading PSF...\n');
 psf = load_tiff_stack(psf_path);
-psf = psf / sum(psf(:)); % Normalize PSF
-psf = padarray(psf, [pad_size, pad_size, 0], 'symmetric', 'both'); % Pad PSF
+psf = psf / sum(psf(:));
+fprintf('PSF sum=%.10f  max=%.6e\n', sum(psf(:)), max(psf(:)));
 
 %   Get All Motion-Corrected Folders  
 inputFolders = dir(fullfile(inputRoot, '*_motion_corrected'));
@@ -89,7 +90,7 @@ for i = 1:length(inputFolders)
     if use_mat
         % Load MAT file using memory-efficient matfile()
         m = matfile(input_path, 'Writable', false);
-        [rows, cols, total_slices] = size(m, 'stack');
+        [rows, cols, total_slices] = size(m, 'Mpr');
     else
         % Load TIFF stack
         stack = load_tiff_stack(input_path);
@@ -102,11 +103,10 @@ for i = 1:length(inputFolders)
 
     %   Initialize Output MAT File  
     m_out = matfile(output_mat_path, 'Writable', true);
-    m_out.stack = zeros(rows, cols, total_slices, 'single');
+    m_out.Mpr = zeros(rows, cols, total_slices, 'single');
 
     fprintf('Starting RL Deconvolution for %s...\n', folderName);
 
-    %   Apply RL Deconvolution Volume-by-Volume  
     %   Apply RL Deconvolution Volume-by-Volume (Parallelized)  
     deconv_results = cell(1, num_volumes); % Temporary storage (cannot write to MAT in parfor)
     
@@ -118,7 +118,7 @@ for i = 1:length(inputFolders)
         vol_end = vol * slices_per_vol;
         
         if use_mat
-            vol_data = m.stack(:,:, vol_start:vol_end);
+            vol_data = m.Mpr(:,:, vol_start:vol_end);
         else
             %vol_data = stack(:,:, vol_start:vol_end); % Need to fix this for
             %tif processing. but why ue tif anyway?
@@ -141,11 +141,11 @@ for i = 1:length(inputFolders)
         for vol = 1:num_volumes
             vol_start = (vol - 1) * slices_per_vol + 1;
             vol_end = vol * slices_per_vol;
-            m_out.stack(:,:, vol_start:vol_end) = deconv_results{vol};
+            m_out.Mpr(:,:, vol_start:vol_end) = deconv_results{vol};
         end
     
         fprintf('RL Deconvolution complete! Results saved to: %s\n', output_mat_path);
-    
+
         %   Save as TIFF  
 %        save_tiff_stack(output_tiff_path, m_out.stack);
 %        fprintf('Saved RL Deconvolved TIFF: %s\n', output_tiff_path);
@@ -161,7 +161,7 @@ function stack = load_tiff_stack(filepath)
     num_images = numel(info);
     stack = zeros(info(1).Height, info(1).Width, num_images, 'single');
     for i = 1:num_images
-        stack(:,:,i) = im2single(imread(filepath, i));
+        stack(:,:,i) = single(imread(filepath, i));  % no rescaling
     end
 end
 
@@ -175,8 +175,8 @@ function save_tiff_stack(filename, matStack)
     t = Tiff(filename, 'w8');
 
     % Set TIFF Metadata
-    tagstruct.ImageLength = size(m.stack, 1);
-    tagstruct.ImageWidth = size(m.stack, 2);
+    tagstruct.ImageLength = size(m.Mpr, 1);
+    tagstruct.ImageWidth = size(m.Mpr, 2);
     tagstruct.Photometric = Tiff.Photometric.MinIsBlack;
     tagstruct.BitsPerSample = 16;
     tagstruct.SamplesPerPixel = 1;
@@ -187,7 +187,7 @@ function save_tiff_stack(filename, matStack)
     %   Write Frames to TIFF Stack  
     for k = 1:numSlices
         t.setTag(tagstruct);
-        t.write(uint16(m.stack(:,:,k) * 65535)); % Scale to 16-bit
+        t.write(uint16(m.Mpr(:,:,k) * 65535)); % Scale to 16-bit
         if k < numSlices
             t.writeDirectory(); % Create a new directory for the next frame
         end
