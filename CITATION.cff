@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "WIDE-CAT: Widefield Calcium Analysis Toolbox"
+type: software
+authors:
+  - family-names: Rajan
+    given-names: Gokul
+version: 1.0.0
+doi: 10.5281/zenodo.17162471
+repository-code: "https://github.com/gklrajan/WIDE-CAT"
+url: "https://doi.org/10.5281/zenodo.17162471"
+license: GPL-3.0-only
+keywords:
+  - calcium imaging
+  - widefield imaging
+  - volumetric imaging
+  - voxel analysis
+  - deconvolution
+  - computational sectioning
