@@ -27,14 +27,14 @@
 clear; clc;
 
 %% — USER PARAMETERS — 
-INPUT_ROOT             = 'F:\WilDeCaT\Data\003_adults_lnm_ctrl_3day-nonUS-training_'
-RESULT_ROOT            = fullfile(INPUT_ROOT, 'results');
-frames_per_volume      = 40;
-stim_start_volume      = 17;    
-stim_repeat_volume     = stim_start_volume;
-stim_duration_volumes  = 6;     
-slice_acquisition_time = 0.050; 
-baseline_window        = 50;    
+INPUT_ROOT             = 'D:\Gokul\2026b_data\d';
+RESULT_ROOT            = fullfile(INPUT_ROOT, 'rl_deconvolved');%results
+frames_per_volume      = 20;
+stim_start_volume      = 26;    
+stim_repeat_volume     = 25;
+stim_duration_volumes  = 5;     
+slice_acquisition_time = 0.030; 
+baseline_window        = 25;    
 hex_radius             = 7;
 
 %% — PATH SETUP —
@@ -60,10 +60,11 @@ for i = 1:numel(subdirs)
     end
     mkdir(dfF_dir);
     fprintf('\n=== Processing %s ===\n', subn);
-
+    
     % Locate .mat
-    matpat = fullfile(outDir, [subn '*_motion_corrected.mat']);
-    F = dir(matpat);
+    matpat = fullfile(outDir, [subn '*.mat']);% _motion_correct.mat
+    
+    F = dir(fullfile(outDir,'*.mat'));%dir(matpat);
     if isempty(F)
         warning('No motion_corrected.mat -> skipping %s\n', subn);
         continue;
@@ -101,11 +102,17 @@ for i = 1:numel(subdirs)
 
     %% Step 4: Stimulus periods
     fprintf('  Computing stimulus timing...\n');
-    stim_periods_per_slice = compute_stim_timing( ...
-        n_volumes, stim_start_volume, stim_repeat_volume, ...
-        stim_duration_volumes, frames_per_volume, slice_acquisition_time);
-    save(fullfile(dfF_dir, 'stim_slices.mat'), 'stim_periods_per_slice');
 
+    stim_periods_per_slice = compute_stim_timing( ...
+    n_volumes, ...
+    stim_start_volume, ...
+    stim_repeat_volume, ...
+    stim_duration_volumes, ...
+    frames_per_volume, ...
+    slice_acquisition_time);
+
+    save(fullfile(dfF_dir, 'stim_slices.mat'), 'stim_periods_per_slice');
+   
     %% Step 5: ROI segmentation
     fprintf('  Segmenting ROIs...\n');
     hex_rois = segment_hexagonal_rois(motion_mat, brain_mask, hex_radius);

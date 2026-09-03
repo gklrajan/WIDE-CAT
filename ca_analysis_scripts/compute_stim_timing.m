@@ -1,39 +1,43 @@
+function stim_slices = compute_stim_timing( ...
+    n_volumes, stim_start, stim_repeat_vol, stim_duration, ...
+    slices_per_volume, slice_acquisition_time)
 
-function stim_slices = compute_stim_timing(n_volumes, stim_start, stim_duration, stim_repeat_vol, slices_per_volume, slice_acquisition_time)
-    % Ensure valid number of volumes is provided
-    if nargin < 1
-        error('Number of volumes (n_volumes) is required.');
-    end
+    % Columns:
+    % 1 = slice number within volume
+    % 2 = volume number
+    % 3 = acquisition time (seconds)
+    % 4 = stimulus status (0 = OFF, 1 = ON)
 
-    % Correct stimulus repeat interval
-    stim_repeat_vol = 17; % Fix based on acquisition script
+    total_slices = n_volumes * slices_per_volume;
+    stim_slices = zeros(total_slices, 4);
 
-    % Generate stimulus start times at the first slice of each volume
-    stim_start_volumes = stim_start:stim_repeat_vol:n_volumes;
+    for volume_idx = 1:n_volumes
 
-    % Initialize output
-    stim_slices = [];
+        % Number of volumes relative to first stimulus
+        relative_vol = volume_idx - stim_start;
 
-    % Compute exact stimulus onset time per slice
-    for start_volume = stim_start_volumes
+        % Determine whether stimulus is ON
+        if relative_vol >= 0
+            stim_status = ...
+                mod(relative_vol, stim_repeat_vol) < stim_duration;
+        else
+            stim_status = false;
+        end
+
+        % Assign stimulus status to every slice in this volume
         for slice_idx = 1:slices_per_volume
-            % Compute actual acquisition time of each slice
-            slice_time = ((start_volume - 1) * slices_per_volume + (slice_idx - 1)) * slice_acquisition_time;
 
-            % Define stimulus onset time based on the **first slice of the volume**
-            stim_start_time = (start_volume - 1) * slices_per_volume * slice_acquisition_time;
-            stim_end_time = (start_volume + stim_duration - 1) * slices_per_volume * slice_acquisition_time;
+            global_slice = ...
+                (volume_idx - 1) * slices_per_volume + slice_idx;
 
-            % Adjust for per-slice onset: If a slice is **after the first slice of the volume**, 
-            % it has already been exposed to the stimulus
-            if slice_time >= stim_start_time
-                stim_status = 1; % Stimulus is ON for this slice
-            else
-                stim_status = 0; % Stimulus is OFF
-            end
+            slice_time = ...
+                (global_slice - 1) * slice_acquisition_time;
 
-            % Store slice-wise stimulus period
-            stim_slices = [stim_slices; slice_idx, start_volume, slice_time, stim_status];
+            stim_slices(global_slice,:) = [ ...
+                slice_idx, ...
+                volume_idx, ...
+                slice_time, ...
+                double(stim_status)];
         end
     end
 end
