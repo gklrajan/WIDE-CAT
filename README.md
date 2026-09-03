@@ -52,7 +52,7 @@ Once raw volumetric imaging data is acquired, it undergoes a series of preproces
 
 - The main scripts are prefixed as Z01 and Z02. The folder also contains various other functions that the main scripts rely on.
 - Hexagonal ROI handling with flexible voxel sizing.
-- Cluster-based permutation analysis adapted from fMRI approach.
+- Cluster-based permutation analysis (an fMRI-like approach).
 
 ---
 
