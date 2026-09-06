@@ -1,4 +1,4 @@
-[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.17162471-0A7BBB?logo=zenodo&logoColor=white)](https://doi.org/10.5281/zenodo.17162471)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.17162471-0A7BBB?logo=zenodo&logoColor=white)](https://doi.org/10.5281/zenodo.22283475)
 
 # Widefield Calcium Analysis Toolbox (WIDE-CAT)
 
