@@ -1,23 +1,16 @@
-%% XX_cluster_and_phase_shifted.m
+%% XX_01c_cluster_and_phase_shifted_spatialnull_mean.m
 % Voxelwise analysis with 3D CLUSTER-BASED PERMUTATION CORRECTION.
 %
-% SCORING CHANGE (vs previous version):
-%   Old: score = mean(post across all trials) - mean(pre across all trials)
-%        → one large response on a single trial inflates the score
-%
-%   New: score = median across trials of (mean_post_trial - mean_pre_trial)
-%        → each trial contributes equally; one outlier trial cannot
-%          dominate; a voxel must respond consistently to score highly
-%
-%   Window change: PRE_BASE_LAGS = -a5:-1, POST_LAGS_SCORE = 0:4
-%        → symmetric 5-volume windows; removes bias from asymmetric
-%          averaging that could inflate scores during sustained
-%          spontaneous activity
+% MEAN SCORING:
+%   score = mean across trials of (mean_post_trial - mean_pre_trial)
+
+%% 
 %
 % METHOD SUMMARY:
 %   Non-parametric cluster-based permutation test (Maris & Oostenveld 2007,
 %   J Neurosci Methods). Adapted for widefield calcium imaging with 3D hex
-%   tile voxel structure and phase-randomisation null.
+%   tile voxel structure and a spatial-covariance-preserving common-phase
+%   randomisation null.
 %
 % PIPELINE:
 %   Step 0 — Pilot run (N_PILOT surrogates):
@@ -28,7 +21,7 @@
 %
 %   Step 1 — Observed score per voxel:
 %             For each trial: score_t = mean(post lags) - mean(pre lags)
-%             Final score = median(score_t across trials)
+%             Final score = mean(score_t across trials)
 %
 %   Step 2 — Primary threshold on real data:
 %             prim_pass = (scoreObs > score_thresh) & (scoreObs > 0)
@@ -36,22 +29,31 @@
 %   Step 3 — 3D connected clusters on prim_pass voxels.
 %             Cluster mass = sum of scores within cluster.
 %
-%   Step 4 — Phase-randomisation null (N_SHUF iterations, parfor):
+%   Step 4 — Common-phase randomisation null (N_SHUF iterations, parfor):
+%             At each temporal frequency, the same random phase rotation is
+%             applied to every voxel. This randomises timing relative to the
+%             stimulus while preserving the multivoxel cross-spectrum and
+%             therefore the spatial covariance/traveling-wave structure.
 %             Each surrogate: same score_thresh applied identically,
 %             same cluster procedure, record max cluster mass.
 %
 %   Step 5 — Cluster-level inference:
-%             cluster_p = fraction of null max-masses >= observed mass.
-%             Significant if cluster_p < CLUSTER_ALPHA.
+%             cluster_p = (1 + number of null max-masses >= observed mass)
+%                         / (N_SHUF + 1).
+%             Significant if cluster_p <= CLUSTER_ALPHA.
 
 clear; clc;
 
 %% ===================== USER PARAMETERS ====================
-INPUT_ROOT = 'D:\Gokul\2026b_data\d';
+INPUT_ROOT = 'F:\lnm_brain_data_GR_2026_clean\L';
+envInputRoot = getenv('WIDECAT_CLUSTER_INPUT_ROOT');
+if ~isempty(envInputRoot), INPUT_ROOT = envInputRoot; end
 RESULT_ROOT = fullfile(INPUT_ROOT, 'rl_deconvolved');
 
+
 % --- Scoring ---
-SCORE_AGG   = 'mean';       % aggregation within post window per trial: 'mean' or 'peak'
+SCORE_AGG   = 'mean';       % within-trial post window: 'mean' or 'peak'
+TRIAL_AGG   = 'mean';       % across trial-wise post-minus-pre scores; locked for this script
 DO_HIGHPASS = true;
 HP_METHOD   = 'movmedian';
 HP_WIN_VOL  = 41;
@@ -88,13 +90,18 @@ Z_STEP_UM          = 10.0;
 RNG_SEED = 1;
 
 %% ===================== DERIVED TAGS =====================
-SCORE_AGG = lower(string(SCORE_AGG));
-assert(ismember(SCORE_AGG,["peak","mean"]), 'SCORE_AGG must be ''peak'' or ''mean''.');
+SCORE_AGG = lower(char(SCORE_AGG));
+assert(ismember(SCORE_AGG, {'peak','mean'}), ...
+    'SCORE_AGG must be ''peak'' or ''mean''.');
+TRIAL_AGG = lower(char(TRIAL_AGG));
+assert(strcmp(TRIAL_AGG, 'mean'), ...
+    'This is the mean variant; TRIAL_AGG must remain ''mean''.');
 
 hpTag    = ternary(DO_HIGHPASS, sprintf('HP_%s_win%d',char(HP_METHOD),HP_WIN_VOL), 'HP_OFF');
-scoreTag = sprintf('SCORE_MEDIAN_%s', upper(char(SCORE_AGG)));   % MEDIAN in tag
+scoreTag = sprintf('TRIAL%s_WINDOW%s', upper(char(TRIAL_AGG)), ...
+    upper(char(SCORE_AGG)));
 
-OUT_SUBFOLDER = sprintf('CLUSTER_PHASERAND_N%d_%s_%s_PPRIM%.2f_CALPHA%.2f', ...
+OUT_SUBFOLDER = sprintf('CLUSTER_COMMONPHASE_N%d_%s_%s_PPRIM%.2f_CALPHA%.2f', ...
     N_SHUF, scoreTag, hpTag, P_PRIM, CLUSTER_ALPHA);
 
 %% ===================== FIND DATASETS =====================
@@ -215,6 +222,10 @@ for dataset_idx = 1:numel(subdirs)
     end
     valid_coords = isfinite(cx_um) & isfinite(cy_um) & isfinite(cz_um);
     fprintf('  Valid centroids: %d/%d\n', sum(valid_coords), nVox);
+    if ~any(valid_coords)
+        fprintf('  No voxels have valid spatial coordinates. SKIP.\n');
+        continue;
+    end
 
     %% ── 3D neighbour graph ───────────────────────────────────────────────
     fprintf('  Building 3D neighbour graph...\n');
@@ -226,19 +237,19 @@ for dataset_idx = 1:numel(subdirs)
     fprintf('  Edges: %d\n', numel(adj_i));
 
     %% ── Observed score ───────────────────────────────────────────────────
-    fprintf('  Observed score (per-trial median)...\n');
+    fprintf('  Observed score (%s across trial-wise responses)...\n', ...
+        char(TRIAL_AGG));
     preL       = PRE_BASE_LAGS(:)';
     postL      = POST_LAGS_SCORE(:)';
-    nPre       = numel(preL);
-    nPost      = numel(postL);
     scoreAgg_c = char(SCORE_AGG);
+    trialAgg_c = char(TRIAL_AGG);
 
     % Build index matrices once — reused for all surrogates
     idx_base_mat = onsets(:) + preL;    % [nTrials x nPre]
     idx_post_mat = onsets(:) + postL;   % [nTrials x nPost]
 
-    scoreObs = score_voxels_mean(double(dff), idx_base_mat, idx_post_mat, ...
-                                   nTrials, nPost, nVox, scoreAgg_c);
+    scoreObs = score_voxels_by_trials(double(dff), idx_base_mat, ...
+        idx_post_mat, nTrials, nVox, scoreAgg_c, trialAgg_c);
     scoreObs(~isfinite(scoreObs)) = -inf;
 
     %% ── Precompute FFT once ──────────────────────────────────────────────
@@ -258,16 +269,21 @@ for dataset_idx = 1:numel(subdirs)
     pilot_scores = zeros(N_PILOT, nVox, 'single');
 
     parfor iter = 1:N_PILOT
-        phi             = 2*pi * rand(nFree, nVox);
+        % One phase rotation per temporal frequency, shared by every voxel.
+        % This preserves the multivoxel cross-spectrum/spatial covariance.
+        phase_rotation  = exp(1i * 2*pi * rand(nFree, 1));
         Fs              = dff_fft;
-        Fs(freeBins,:)  = Fs(freeBins,:)  .* exp(1i * phi);
+        Fs(freeBins,:)  = Fs(freeBins,:)  .* phase_rotation;
         Fs(mirrorBins,:)= conj(Fs(freeBins,:));
         surr = real(ifft(Fs, [], 1));
-        pilot_scores(iter,:) = single(score_voxels_mean(surr, ...
-            idx_base_mat, idx_post_mat, nTrials, nPost, nVox, scoreAgg_c));
+        pilot_scores(iter,:) = single(score_voxels_by_trials(surr, ...
+            idx_base_mat, idx_post_mat, nTrials, nVox, scoreAgg_c, trialAgg_c));
     end
 
-    all_pilot    = pilot_scores(:);
+    % Match the observed analysis by deriving the threshold only from voxels
+    % that have valid spatial coordinates.
+    all_pilot    = pilot_scores(:, valid_coords);
+    all_pilot    = all_pilot(:);
     all_pilot    = all_pilot(isfinite(all_pilot));
     score_thresh = prctile(all_pilot, (1-P_PRIM)*100);
     clear pilot_scores all_pilot;
@@ -281,20 +297,21 @@ for dataset_idx = 1:numel(subdirs)
     scoreObs_bc  = scoreObs;
     score_thr_bc = score_thresh;
     req_pos_bc   = REQUIRE_POS;
+    valid_coords_bc = valid_coords(:)';
 
     null_max_mass       = zeros(1, N_SHUF, 'double');
     null_cluster_counts = zeros(1, N_SHUF, 'double');
     null_GE             = zeros(1, nVox,   'uint32');
 
     parfor iter = 1:N_SHUF
-        phi             = 2*pi * rand(nFree, nVox);
+        phase_rotation  = exp(1i * 2*pi * rand(nFree, 1));
         Fs              = dff_fft;
-        Fs(freeBins,:)  = Fs(freeBins,:)  .* exp(1i * phi);
+        Fs(freeBins,:)  = Fs(freeBins,:)  .* phase_rotation;
         Fs(mirrorBins,:)= conj(Fs(freeBins,:));
         surr = real(ifft(Fs, [], 1));
 
-        sNull = score_voxels_mean(surr, idx_base_mat, idx_post_mat, ...
-                                    nTrials, nPost, nVox, scoreAgg_c);
+        sNull = score_voxels_by_trials(surr, idx_base_mat, idx_post_mat, ...
+            nTrials, nVox, scoreAgg_c, trialAgg_c);
         sNull(~isfinite(sNull)) = -inf;
 
         null_GE = null_GE + uint32(sNull >= scoreObs_bc);
@@ -303,6 +320,7 @@ for dataset_idx = 1:numel(subdirs)
         if req_pos_bc
             prim_mask = prim_mask & (sNull > 0);
         end
+        prim_mask = prim_mask & valid_coords_bc;
 
         [mm, nc] = find_max_cluster_mass(prim_mask, sNull, ...
                                          adj_i, adj_j, uint32(nVox));
@@ -312,6 +330,7 @@ for dataset_idx = 1:numel(subdirs)
 
     p_uncorr = (1 + double(null_GE)) ./ (1 + N_SHUF);
     p_uncorr(~isfinite(scoreObs)) = 1;
+    p_uncorr(~valid_coords_bc) = 1;
     p_uncorr = p_uncorr(:)';
 
     fprintf('  Null complete.  p-resolution=%.4g\n', 1/(1+N_SHUF));
@@ -338,8 +357,9 @@ for dataset_idx = 1:numel(subdirs)
     cluster_p   = nan(1, n_clusters_obs);
     cluster_sig = false(1, n_clusters_obs);
     for c = 1:n_clusters_obs
-        cluster_p(c)   = mean(null_max_mass >= cluster_masses(c));
-        cluster_sig(c) = cluster_masses(c) >= cluster_thresh_mass;
+        cluster_p(c) = (1 + sum(null_max_mass >= cluster_masses(c))) / ...
+            (N_SHUF + 1);
+        cluster_sig(c) = cluster_p(c) <= CLUSTER_ALPHA;
     end
 
     n_sig = sum(cluster_sig);
@@ -360,7 +380,7 @@ for dataset_idx = 1:numel(subdirs)
     %% ── Save payload ─────────────────────────────────────────────────────
     out_dir  = fullfile(dfF_dir, 'paper_figures_pretty', OUT_SUBFOLDER);
     if ~exist(out_dir,'dir'), mkdir(out_dir); end
-    safeStem = sprintf('fish%03d', dataset_idx);
+    safeStem = sprintf('TRIAL%s_fish%03d', upper(char(TRIAL_AGG)), dataset_idx);
 
     payload = struct();
     payload.scoreObs          = scoreObs;
@@ -386,14 +406,16 @@ for dataset_idx = 1:numel(subdirs)
     payload.CLUSTER_ALPHA     = CLUSTER_ALPHA;
     payload.REQUIRE_POS       = REQUIRE_POS;
     payload.SCORE_AGG         = char(SCORE_AGG);
-    payload.SCORE_METHOD      = 'per_trial_median';
+    payload.TRIAL_SCORE_AGG   = char(TRIAL_AGG);
+    payload.SCORE_METHOD      = sprintf('per_trial_%s', char(TRIAL_AGG));
     payload.DO_HIGHPASS       = DO_HIGHPASS;
     payload.HP_METHOD         = char(HP_METHOD);
     payload.HP_WIN_VOL        = HP_WIN_VOL;
     payload.PRE_BASE_LAGS     = PRE_BASE_LAGS;
     payload.POST_LAGS_SCORE   = POST_LAGS_SCORE;
     payload.STIM_DUR_VOL      = STIM_DUR_VOL;
-    payload.nullType          = 'phase_randomisation_cluster_symmetric';
+    payload.nullType          = ...
+        'common_phase_randomisation_spatial_covariance_preserved';
     payload.LATERAL_THRESH_UM = LATERAL_THRESH_UM;
     payload.AXIAL_XY_THRESH_UM= AXIAL_XY_THRESH_UM;
     payload.Z_STEP_UM         = Z_STEP_UM;
@@ -417,20 +439,18 @@ function out = ternary(cond, a, b)
     if cond, out=a; else, out=b; end
 end
 
-% ── NEW: Per-trial median scoring ─────────────────────────────────────────
-function score = score_voxels_mean(data, idx_base_mat, idx_post_mat, ...
-                                     nTrials, nPost, nVox, aggMode)
-% Compute score per trial, then take median across trials.
+% ── Trial-wise scoring followed by explicit across-trial aggregation ──────
+function score = score_voxels_by_trials(data, idx_base_mat, idx_post_mat, ...
+                                         nTrials, nVox, windowAgg, trialAgg)
+% Compute one post-minus-pre score per trial and voxel, then aggregate the
+% trial-wise scores using TRIAL_AGG.
 %
 % For each trial t:
 %   pre_t  = mean of data at pre-lag timepoints for trial t   [1 x nVox]
 %   post_t = mean (or peak) of data at post-lag timepoints    [1 x nVox]
 %   score_t = post_t - pre_t
 %
-% Final score = median(score_t, across trials)                [1 x nVox]
-%
-% This ensures one outlier trial cannot dominate — a voxel must respond
-% consistently across most trials to achieve a high score.
+% Final score = median or mean(score_t across trials)         [1 x nVox]
 
     trial_scores = zeros(nTrials, nVox);   % [nTrials x nVox]
 
@@ -441,7 +461,7 @@ function score = score_voxels_mean(data, idx_base_mat, idx_post_mat, ...
 
         % Post response for this trial
         post_idx = idx_post_mat(t,:);   % [1 x nPost]
-        if strcmp(aggMode,'peak')
+        if strcmp(windowAgg,'peak')
             post_t = max(data(post_idx,:), [], 1);   % [1 x nVox]
         else
             post_t = mean(data(post_idx,:), 1);       % [1 x nVox]
@@ -450,8 +470,11 @@ function score = score_voxels_mean(data, idx_base_mat, idx_post_mat, ...
         trial_scores(t,:) = post_t - pre_t;
     end
 
-    % median across trials
-    score = median(trial_scores, 1, 'omitnan');   % [1 x nVox]
+    if strcmp(trialAgg, 'mean')
+        score = mean(trial_scores, 1, 'omitnan');
+    else
+        score = median(trial_scores, 1, 'omitnan');
+    end
 end
 
 % ── High-pass filter ──────────────────────────────────────────────────────
@@ -484,8 +507,8 @@ function adj = build_neighbour_graph(cx, cy, cz, nVox, lat_thresh, ax_xy_thresh)
         D(logical(eye(size(D,1)))) = inf;
         [ia,ib] = find(D < lat_thresh);
         keep = ia < ib;
-        adj_i_all = [adj_i_all; idx1(ia(keep))];
-        adj_j_all = [adj_j_all; idx1(ib(keep))];
+        adj_i_all = [adj_i_all; idx1(ia(keep))]; %#ok<AGROW>
+        adj_j_all = [adj_j_all; idx1(ib(keep))]; %#ok<AGROW>
 
         if p1 < n_planes
             mask2 = abs(cz - z_vals(p1+1)) < 0.1;
@@ -493,8 +516,8 @@ function adj = build_neighbour_graph(cx, cy, cz, nVox, lat_thresh, ax_xy_thresh)
             if isempty(idx2), continue; end
             D2 = pdist2(xy1, [cx(idx2), cy(idx2)]);
             [ia2,ib2] = find(D2 < ax_xy_thresh);
-            adj_i_all = [adj_i_all; idx1(ia2)];
-            adj_j_all = [adj_j_all; idx2(ib2)];
+            adj_i_all = [adj_i_all; idx1(ia2)]; %#ok<AGROW>
+            adj_j_all = [adj_j_all; idx2(ib2)]; %#ok<AGROW>
         end
     end
 
@@ -590,11 +613,15 @@ function mask = get_roi_mask(hex_rois, z, t, H, W)
     try
         r = hex_rois{z,1}{1,t};
         if islogical(r)
-            if isequal(size(r),[H W]), mask=r;
-            else, mask=imresize(r,[H W],'nearest')>0;
+            if isequal(size(r),[H W])
+                mask = r;
+            else
+                mask = imresize(r,[H W],'nearest')>0;
             end
         end
-    catch, end
+    catch
+        mask = [];
+    end
 end
 
 % ── Flatten hex_rois ──────────────────────────────────────────────────────
@@ -605,8 +632,8 @@ function rois = flatten_rois(hex_rois)
         tmp={};
         for i=1:numel(hex_rois)
             x=hex_rois{i};
-            if iscell(x), tmp=[tmp;x(:)];
-            elseif isstruct(x)||islogical(x), tmp=[tmp;{x}];
+            if iscell(x), tmp=[tmp;x(:)]; %#ok<AGROW>
+            elseif isstruct(x)||islogical(x), tmp=[tmp;{x}]; %#ok<AGROW>
             end
         end
         rois=tmp;
@@ -634,3 +661,4 @@ function [H,W] = infer_hw(dfF_dir, rois)
         if islogical(R)&&~isempty(R), H=size(R,1); W=size(R,2); return; end
     end
 end
+
