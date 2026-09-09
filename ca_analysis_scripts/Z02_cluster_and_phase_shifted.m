@@ -1,4 +1,3 @@
-%% XX_01c_cluster_and_phase_shifted_spatialnull_mean.m
 % Voxelwise analysis with 3D CLUSTER-BASED PERMUTATION CORRECTION.
 %
 % MEAN SCORING:
